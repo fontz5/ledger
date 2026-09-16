@@ -1,0 +1,545 @@
+/* Ledger — global stylesheet (task 2.U1: shell + tokens).
+   All token values come VERBATIM from docs/03_DOMAIN_CONSTANTS.md Part B — never edit a hex here
+   without changing 03 first. Mobile-first per D21: svh/dvh viewport units only, nav breakpoint 720px,
+   clamp() for fluid type. Background is plain --paper (no ruled lines — D35). */
+
+/* ---- Root tokens (03 Part B "Root CSS", verbatim) ---- */
+:root {
+  /* surfaces */
+  --paper:        #F6F5F1;   /* page background (warm paper) */
+  --paper-raised: #FFFFFF;   /* cards, inputs' raised state */
+
+  /* ink / text */
+  --ink:       #22282E;      /* primary text (near-black slate) */
+  --ink-soft:  #5B6570;      /* secondary text */
+  --ink-faint: #98A0A8;      /* tertiary text / placeholders */
+
+  /* lines */
+  --line:        #E4E1D8;    /* hairline borders, ruled background */
+  --line-strong: #D3CFC3;    /* stronger borders, input outlines */
+
+  /* accent = highlighter amber (use for "today"/active only, sparingly) */
+  --accent:      #F5C542;
+  --accent-wash: rgba(245, 197, 66, 0.40);
+
+  /* semantic */
+  --positive:      #2E8B70;                    /* progress fill, done state */
+  --positive-wash: rgba(46, 139, 112, 0.14);
+  --danger:        #C4553B;                    /* overdue, high priority, destructive */
+  --danger-wash:   rgba(196, 85, 59, 0.12);
+
+  /* shape */
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(34,40,46,.05), 0 8px 24px rgba(34,40,46,.06);
+
+  /* type */
+  --mono:    "IBM Plex Mono", ui-monospace, monospace;   /* times, dates, chips, numeric */
+  --sans:    "Inter", system-ui, sans-serif;              /* body / UI */
+  --display: "Space Grotesk", var(--sans);                /* headings, logo */
+}
+
+/* ---- Task-colour palette (03 Part B "Task-colour palette", verbatim) ---- */
+:root {
+  --tc-slate:  #5B6570;  --tc-slate-wash:  rgba(91,101,112,.14);   /* default for finite */
+  --tc-teal:   #2E8B70;  --tc-teal-wash:   rgba(46,139,112,.14);   /* default for routine */
+  --tc-amber:  #B7822B;  --tc-amber-wash:  rgba(183,130,43,.15);   /* default for event  */
+  --tc-blue:   #3C6E9E;  --tc-blue-wash:   rgba(60,110,158,.14);
+  --tc-green:  #5E8C3C;  --tc-green-wash:  rgba(94,140,60,.15);
+  --tc-coral:  #C4633F;  --tc-coral-wash:  rgba(196,99,63,.14);
+  --tc-rose:   #B24A6A;  --tc-rose-wash:   rgba(178,74,106,.14);
+  --tc-violet: #6C5AA6;  --tc-violet-wash: rgba(108,90,166,.15);
+}
+
+/* ---- Layout variables (sizing only — not 03 tokens) ---- */
+:root {
+  --nav-h: 56px;
+}
+
+/* ---- Base ---- */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+/* The `hidden` attribute must win over any class that sets its own `display` (.form-field is
+   `display:grid`, .form-checkbox-field is `display:flex`) — author rules of equal origin are
+   sorted by specificity, not source order, so a bare `[hidden]` UA-style rule never overrides
+   them on its own. Without this, openForm's type/recurring-driven field toggling (4.U1/3.U1)
+   sets .hidden=true but the field stays laid out, forcing horizontal overflow on phone. */
+[hidden] { display: none !important; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: clamp(0.9rem, 0.8rem + 1vw, 1.05rem);
+}
+
+/* ---- Shell (D21: svh/dvh, the pane scrolls, the shell does not) ---- */
+.shell {
+  height: 100svh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+.pane { flex: 1; overflow-y: auto; }
+.pane-inner { max-width: 940px; margin: 0 auto; padding: 16px 20px; }
+
+/* ---- Header / logo ---- */
+.header {
+  display: flex;
+  align-items: center;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+.logo {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(1.15rem, 1rem + 1vw, 1.35rem);
+  letter-spacing: -0.02em;
+}
+/* highlighter swipe under the logo (03 Part B "Signature element", verbatim) */
+.logo b { position: relative; }
+.logo b::after {
+  content: ""; position: absolute; left: -3px; right: -3px; bottom: 1px; height: 9px;
+  background: var(--accent-wash); z-index: -1; transform: skewX(-12deg);
+}
+
+/* ---- Navigation (D21: bottom bar on phone, top tabs from 720px) ---- */
+.nav { order: 1; }
+@media (min-width: 720px) { .nav { order: -1; } }
+
+.nav {
+  display: flex;
+  height: var(--nav-h);
+  flex-shrink: 0;
+  background: var(--paper-raised);
+  border-top: 1px solid var(--line);
+}
+@media (min-width: 720px) {
+  .nav { border-top: none; border-bottom: 1px solid var(--line); }
+}
+.tab {
+  flex: 1 1 0;
+  min-height: 40px;
+  border: none;
+  background: transparent;
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: clamp(0.8rem, 0.75rem + 0.5vw, 0.9rem);
+  color: var(--ink-soft);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.tab[aria-current="page"] {
+  color: var(--ink);
+  box-shadow: inset 0 3px 0 var(--ink);   /* indicator on the thumb edge (bottom bar) */
+}
+@media (min-width: 720px) {
+  .tab[aria-current="page"] { box-shadow: inset 0 -3px 0 var(--ink); }
+}
+
+/* ---- Global add (+) control (D35: present on every view) ---- */
+.add-btn {
+  position: absolute;
+  right: 18px;
+  bottom: calc(var(--nav-h) + 18px);   /* clears the bottom nav on phones */
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+@media (min-width: 720px) { .add-btn { bottom: 18px; } }
+
+/* ---- Buttons (03 Part B, verbatim) ---- */
+.btn      { border:1px solid var(--ink); background:var(--ink); color:var(--paper);
+            padding:10px 16px; border-radius:8px; font-weight:600; font-size:14px; }
+.btn.ghost{ background:transparent; color:var(--ink); border-color:var(--line-strong); }
+.btn.sm   { padding:5px 10px; font-size:12px; }
+
+/* ---- Chip (03 Part B "Spacing and sizing") ---- */
+.chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--line-strong);
+}
+
+/* ---- Cards (03 Part B "Color usage rules") ---- */
+.card {
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 13px;
+}
+
+/* ---- Empty / placeholder panes ---- */
+.empty-state, .placeholder {
+  color: var(--ink-faint);
+  text-align: center;
+  padding: 48px 20px;
+}
+
+/* ---- Task list (task 2.U2: hierarchy, progress, breakdown, colour) ---- */
+.task-node { margin: 6px 0; }
+
+/* Row: optional toggle column + content; minmax(0,1fr) so long titles can't blow out
+   the column (D21 grid gotcha). 3px left accent = the task colour (D22); container
+   header rows additionally carry the colour wash as background (set inline from
+   TASK_COLORS — same 03 palette as the --tc-* vars above). */
+.task-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  border-left: 3px solid var(--ink-faint);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 8px 10px;
+  min-height: 40px;
+}
+.task-row:not(.container-row) { background: var(--paper-raised); border-top: 1px solid var(--line); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.task-row > .task-main:only-child { grid-column: 1 / -1; }
+
+.task-toggle {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 14px;
+  width: 40px;      /* 40px tap-target floor (03 Part B "Spacing and sizing") */
+  height: 40px;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Leading controls cell (task 2.U5): holds the chevron and/or the done checkbox in ONE
+   grid column, so the row keeps its two-column grid (03 Part B "checkbox + content")
+   whatever combination of controls a given row has. */
+.task-controls { display: flex; align-items: center; }
+
+/* Finite-only done checkbox (D25). The wrap is the 40px tap-target floor (03 Part B); the
+   input itself stays small — accent-colour ties it to the same --positive used by the
+   progress fill / done tick, no new hex. */
+.task-checkbox-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.task-checkbox {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--positive);
+  cursor: pointer;
+}
+
+.task-main { min-width: 0; }
+.task-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.task-title {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.task-title.done { text-decoration: line-through; color: var(--ink-faint); }
+.task-tick { color: var(--positive); font-family: var(--mono); }
+
+/* Priority chips (03 Part B "Color usage rules": high = danger on danger-wash;
+   medium = #9A6B12 on rgba(245,197,66,.16); low = no chip) */
+.chip.pri-high { color: var(--danger); background: var(--danger-wash); border-color: transparent; }
+.chip.pri-med  { color: #9A6B12; background: rgba(245,197,66,.16); border-color: transparent; }
+
+/* Progress bar: track --line, fill --positive, 5px high, 4px radius (03 Part B) */
+.task-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+}
+.progress-bar {
+  height: 5px;
+  border-radius: 4px;
+  background: var(--line);
+  overflow: hidden;
+}
+.progress-fill { height: 100%; border-radius: 4px; background: var(--positive); }
+.progress-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* Events have no progress (D20/D25) — rendered by date instead */
+.task-event-date {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-top: 3px;
+}
+
+/* Container breakdown line (D6: "deliverables N% · sessions D/T") + nesting indent */
+.task-breakdown {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+  padding: 4px 0 0 10px;
+}
+.task-children { padding-left: clamp(10px, 2vw + 4px, 22px); }
+
+/* ---- Pinned Overdue section (task 2.U3, D31; 03 "Overdue: --danger text with
+   --danger-wash background chip"). Sits above the tree; the leaf ALSO stays in its
+   place in the tree (a lift, not a move-away). Actions are wired in 2.U5. ---- */
+.overdue-section {
+  border-left: 3px solid var(--danger);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--paper-raised);
+  border-top: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 10px;
+  margin-bottom: 12px;
+}
+.overdue-heading {
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.overdue-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.overdue-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.overdue-title {
+  color: var(--danger);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.chip.overdue-chip {
+  color: var(--danger);
+  background: var(--danger-wash);
+  border-color: transparent;
+  white-space: nowrap;
+}
+.overdue-actions { display: flex; gap: 8px; }
+
+/* Content tap-target focus (2.U4: the row content is a role=button that opens the detail
+   popup — give it the same visible focus ring as native controls in the a11y floor). */
+.task-main:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Scroll clearance so the last row clears the floating add (+) control (2026-07-16 UI fix).
+   The add-btn floats over the bottom-right of the scrolling pane; this keeps the final row
+   reachable above it. Sizing only — no 03 token involved. */
+.task-list { padding-bottom: 96px; }
+
+/* ---- Detail popup + add/edit form (task 2.U4). Built entirely from existing 03 tokens
+   (paper-raised/line/ink/danger + .card/.btn) — no new hex. Detail-first: tap a row →
+   read-only popup; Edit/Add subtask/Delete are secondary from there. ---- */
+#modal-host { position: fixed; inset: 0; z-index: 10; }
+/* scrim = the --ink token at reduced opacity (overlay is a SIBLING of the dialog, so the
+   dialog is not dimmed) — no invented colour value. */
+.modal-overlay { position: absolute; inset: 0; background: var(--ink); opacity: .38; }
+.modal-card {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: min(520px, 100%);
+  max-height: 85svh;
+  max-height: 85dvh;
+  overflow-y: auto;
+  border-radius: var(--radius) var(--radius) 0 0;   /* sheet on phone */
+}
+@media (min-width: 720px) {
+  .modal-card {
+    top: 50%;
+    bottom: auto;
+    transform: translate(-50%, -50%);
+    border-radius: var(--radius);
+  }
+}
+.modal-title {
+  font-family: var(--display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+.modal-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+/* Detail meta + description */
+.detail-meta { display: grid; gap: 4px; margin-bottom: 12px; }
+.detail-meta-row { display: flex; gap: 10px; font-size: 13px; }
+.detail-meta-key { color: var(--ink-soft); min-width: 84px; }
+.detail-meta-val { color: var(--ink); overflow-wrap: anywhere; }
+.detail-desc-label { font-size: 12px; color: var(--ink-soft); margin-bottom: 3px; }
+.detail-desc { margin: 0; color: var(--ink); overflow-wrap: anywhere; white-space: pre-wrap; }
+.detail-delete-btn, .modal-confirm-delete { color: var(--danger); border-color: var(--danger); }
+.modal-confirm-delete { background: var(--danger); color: var(--paper); border-color: var(--danger); }
+.modal-confirm-msg { margin: 0 0 4px; color: var(--ink); overflow-wrap: anywhere; }
+
+/* Add / edit form controls */
+/* grid-template-columns: minmax(0,1fr) (03 Part B / D21 a11y floor) — an implicit `auto` track
+   sizes to content's max-content width, uncapped by the container, so a native date/
+   datetime-local input's WebKit intrinsic width can force the column past the modal's edge.
+   minmax(0,1fr) makes the track fill the container and lets it shrink below content size. */
+.task-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.form-field { display: grid; gap: 4px; min-width: 0; }
+.form-label { font-size: 12px; color: var(--ink-soft); }
+.form-control {
+  font-family: var(--sans);
+  font-size: 16px;              /* floor, not a style choice (03 Part B): below 16px, iOS/Android
+                                    auto-zoom the viewport on focus, which desyncs tap coordinates
+                                    from layout and can dismiss the form on the next tap */
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 9px 10px;
+  min-height: 40px;                                  /* 40px tap-target floor (03 Part B) */
+  width: 100%;
+  min-width: 0;
+}
+textarea.form-control { min-height: 72px; resize: vertical; }
+
+/* iOS Safari's native date/time/datetime-local chrome ignores width:100% on the closed-state
+   box (measured ~18px wider than the CSS box regardless of container width) — stripping the
+   native appearance drops back to the plain box model; the tap-to-open wheel picker is
+   unaffected (that behaviour isn't tied to -webkit-appearance). */
+input[type="date"].form-control,
+input[type="time"].form-control,
+input[type="datetime-local"].form-control {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Colour picker (task 2.U5): 8 TASK_COLORS swatches, each painted from state.js — no hex
+   invented here. Pressed swatch gets an --ink ring (03 palette + focus-ring tokens only). */
+.swatch-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.swatch[aria-pressed="true"] { border-color: var(--ink); }
+
+/* Recurrence weekday multi-select (task 3.U1): toggle buttons at the 40px tap-target
+   floor, matching the swatch-row pattern. Pressed state uses --ink (same as the swatch
+   ring) — --accent stays reserved for "today"/active only (03 colour rules). */
+.weekday-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.weekday-btn {
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-raised);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+}
+.weekday-btn[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+/* Inline validation error (3.U1: validateRecurrence's message, shown, nothing created). */
+.form-error { margin: 0; font-size: 13px; color: var(--danger); }
+
+/* Event-only boolean toggles (task 4.U1: All day / Recurring). Laid out as "[ ] Label"
+   rather than the label-above-control pattern the other fields use; the wrapping <label>
+   itself hits the 40px tap-target floor. --ink accent matches the swatch/weekday-btn
+   pressed colour (--accent stays reserved for today/active, 03 colour rules). */
+.form-checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  min-width: 0;         /* same grid-item shrink fix as .form-field, see above */
+  cursor: pointer;
+}
+.form-checkbox {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--ink);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Routine occurrence list (task 3.U2): a routine's detail popup can hold 16+ rows, so the
+   list gets its own capped, scrollable region (phone-first) rather than relying on the
+   modal's own scroll. No new hex — done uses --positive, skipped/moved use --ink-faint
+   (the amber accent stays reserved for today/active per 03 colour rules). */
+.occurrence-list {
+  display: grid;
+  gap: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0 0 12px;
+  border-top: 1px solid var(--line);
+}
+.occurrence-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.occurrence-date { font-family: var(--mono); font-size: 13px; color: var(--ink); min-width: 82px; }
+.occurrence-time { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); flex: 1; }
+.occurrence-status {
+  min-width: 76px;
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-raised);
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.occurrence-status.status-done { border-color: var(--positive); color: var(--positive); }
+.occurrence-status.status-skipped,
+.occurrence-status.status-moved { border-color: var(--ink-faint); color: var(--ink-faint); }
+
+/* Event occurrence list (task 4.U2): same row/date/time shape as 3.U2's routine list above,
+   but two actions (Edit/Cancel, .btn.sm.ghost) instead of one status button — no new hex. */
+.occurrence-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ---- Focus and motion (03 Part B accessibility floor, verbatim) ---- */
+input:focus, select:focus, textarea:focus, button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
