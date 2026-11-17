@@ -1,4 +1,4 @@
-/* Ledger — global stylesheet (task 2.U1: shell + tokens).
+/* PIN — global stylesheet (task 2.U1: shell + tokens).
    All token values come VERBATIM from docs/03_DOMAIN_CONSTANTS.md Part B — never edit a hex here
    without changing 03 first. Mobile-first per D21: svh/dvh viewport units only, nav breakpoint 720px,
    clamp() for fluid type. Background is plain --paper (no ruled lines — D35). */
@@ -57,6 +57,13 @@
 
 /* ---- Base ---- */
 * { box-sizing: border-box; }
+/* touch-action:manipulation kills double-tap-to-zoom sitewide while leaving pinch-zoom intact.
+   Set at the root rather than on individual elements (.cal-day, .pane, etc.) because Safari's
+   ancestor-intersection handling for this property is unreliable in practice — a per-element
+   rule was confirmed (2026-09-19, force-quit + private-tab retest) to still zoom on a plain
+   Month day-cell button. A root-level rule has nothing above it to intersect against, so it's
+   the standard robust fix; the narrower per-element rules stay too as harmless reinforcement. */
+html { touch-action: manipulation; }
 html, body { margin: 0; padding: 0; }
 /* The `hidden` attribute must win over any class that sets its own `display` (.form-field is
    `display:grid`, .form-checkbox-field is `display:flex`) — author rules of equal origin are
@@ -80,7 +87,11 @@ body {
   overflow: hidden;
   position: relative;
 }
-.pane { flex: 1; overflow-y: auto; }
+/* touch-action:manipulation suppresses double-tap-to-zoom app-wide (Tasks/Deadlines/Calendar
+   Month all reported it; Day/Week already had its own copy on .timegrid) while still allowing
+   pinch-zoom and normal scrolling — .pane is the one shared ancestor of every view (index.html),
+   so a single rule here covers all of them instead of repeating it per view (2026-09-19). */
+.pane { flex: 1; overflow-y: auto; touch-action: manipulation; }
 .pane-inner { max-width: 940px; margin: 0 auto; padding: 16px 20px; }
 
 /* ---- Header / logo ---- */
@@ -88,6 +99,11 @@ body {
   display: flex;
   align-items: center;
   padding: 10px 20px;
+  /* 7.P2: viewport-fit=cover (7.P1) lets the page paint under the status bar, so the header
+     pads itself down by whatever the device reports. With status-bar-style "default" iOS keeps
+     the bar opaque and this resolves to 0 in standalone portrait — it earns its keep in landscape
+     and if the style is ever switched to black-translucent. Fallback 0px = unchanged elsewhere. */
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
   border-bottom: 1px solid var(--line);
   background: var(--paper);
 }
@@ -110,13 +126,20 @@ body {
 
 .nav {
   display: flex;
-  height: var(--nav-h);
+  /* 7.P2: below 720px the nav IS the bottom bar, so it grows by the home-indicator inset and
+     pads its own content up out of it — the tabs keep their 40px tap target, they just stop
+     sitting under the indicator. Fallback 0px, so geometry is identical wherever there is no
+     inset (desktop, Android without gesture nav, any non-standalone browser). */
+  height: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   flex-shrink: 0;
   background: var(--paper-raised);
   border-top: 1px solid var(--line);
 }
 @media (min-width: 720px) {
   .nav { border-top: none; border-bottom: 1px solid var(--line); }
+  /* from 720px the nav moves to the TOP (order:-1 above), so a bottom inset is wrong there */
+  .nav { height: var(--nav-h); padding-bottom: 0; }
 }
 .tab {
   flex: 1 1 0;
@@ -142,7 +165,10 @@ body {
 .add-btn {
   position: absolute;
   right: 18px;
-  bottom: calc(var(--nav-h) + 18px);   /* clears the bottom nav on phones */
+  /* 7.P2: the nav now measures var(--nav-h) + the bottom inset, so the button's offset has to
+     track it or it would sit on top of the tabs on a gesture-nav phone. Fallback 0px keeps the
+     pre-7.P2 value of 74px everywhere an inset is not reported. */
+  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 18px);   /* clears the bottom nav on phones */
   width: 52px;
   height: 52px;
   border-radius: 50%;
@@ -155,7 +181,9 @@ body {
   box-shadow: var(--shadow);
   cursor: pointer;
 }
-@media (min-width: 720px) { .add-btn { bottom: 18px; } }
+/* 7.P2: from 720px the nav is at the top, so the button answers to the home indicator directly
+   (a tablet in landscape still has one). Fallback 0px = the pre-7.P2 18px on desktop. */
+@media (min-width: 720px) { .add-btn { bottom: calc(18px + env(safe-area-inset-bottom, 0px)); } }
 
 /* ---- Buttons (03 Part B, verbatim) ---- */
 .btn      { border:1px solid var(--ink); background:var(--ink); color:var(--paper);
@@ -180,6 +208,21 @@ body {
   box-shadow: var(--shadow);
   padding: 13px;
 }
+
+/* ---- Boot error: unreadable saved data (7.R1 / D28) ---- */
+.boot-error {
+  margin-top: 24px;
+  border-color: var(--danger);
+  background: var(--danger-wash);
+}
+.boot-error-title {
+  font-family: var(--display);
+  font-size: 17px;
+  margin: 0 0 8px;
+  color: var(--danger);
+}
+.boot-error p { margin: 0 0 10px; font-size: 14px; color: var(--ink); overflow-wrap: anywhere; }
+.boot-error-discard { min-height: 40px; }
 
 /* ---- Empty / placeholder panes ---- */
 .empty-state, .placeholder {
@@ -207,6 +250,40 @@ body {
 }
 .task-row:not(.container-row) { background: var(--paper-raised); border-top: 1px solid var(--line); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .task-row > .task-main:only-child { grid-column: 1 / -1; }
+
+/* Task 7.U1: a container and everything under it read as ONE card, not a stack of cards.
+   The box — paper fill, hairline border, --radius, and the 3px colour accent as its left
+   edge (03 Part B "Cards/panels" + D22) — sits on the node WRAP whenever that node has
+   children (`.has-children`, set by renderNode). Same tokens as the leaf card above; no
+   new hex. */
+.task-node.has-children {
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ink-faint);  /* colour set inline from TASK_COLORS (D22) */
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+/* The card owns the accent now, so the container's own header row must not draw a second
+   one immediately inside it (the two are collinear and read as one 6px band). Its colour
+   wash stays — it tints the header against the card's fill (D22, sub-step 4). */
+.task-node.has-children > .task-row { border-left: none; border-radius: 0; }
+
+/* Sub-step 3: the box is drawn at the OUTERMOST container ONLY. Subtasks nest to unlimited
+   depth (a locked requirement), so a box per level would give boxes inside boxes inside
+   boxes. Anything already inside a card stays flat and keeps just its 3px colour accent,
+   which stays legible against the card's fill (D22). */
+.task-node .task-node.has-children {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+.task-node .task-node.has-children > .task-row,
+.task-node .task-node > .task-row:not(.container-row) {
+  background: transparent;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  border-left: 3px solid var(--ink-faint);  /* inline colour still wins (D22 accent) */
+}
 
 .task-toggle {
   border: none;
@@ -353,8 +430,81 @@ body {
 
 /* Scroll clearance so the last row clears the floating add (+) control (2026-07-16 UI fix).
    The add-btn floats over the bottom-right of the scrolling pane; this keeps the final row
-   reachable above it. Sizing only — no 03 token involved. */
+   reachable above it. Sizing only — no 03 token involved.
+   7.P2 checked this and deliberately left it at 96px: the add-btn is offset from the SHELL
+   bottom by (--nav-h + inset + 18px) while the pane's own bottom sits (--nav-h + inset) above
+   it, so the gap between the pane's visible bottom and the button's top edge is 18 + 52 = 70px
+   regardless of the inset. The inset cancels; 96px still clears it with room to spare. */
 .task-list { padding-bottom: 96px; }
+
+/* ---- Task 7.U4 (D47): the grace window's cancel strip + the "Show completed" disclosure.
+   Placed BELOW .task-toggle on purpose — 7.U1's test slices the stylesheet from its own comment
+   to `.task-toggle {` and asserts that slice adds no hex and no width/padding, so this block must
+   sit outside it. Every value below is an existing 03 token; no new hex, no @media (7.U1's other
+   control asserts no at-rule touches .task-node/.task-row), and the only transition is covered by
+   the blanket prefers-reduced-motion rule at the foot of this file. ---- */
+
+/* The strip under a row whose grace window is open. --positive-wash is the same "done" tint the
+   progress fill and the done tick already use. No top/right/bottom border: it is not a card, and
+   a full border here would read as a second box inside the container card. */
+.task-linger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 10px 4px;
+  background: var(--positive-wash);
+  border-radius: 0 0 var(--radius) 0;
+}
+.linger-text { font-family: var(--sans); font-size: 12px; color: var(--ink-soft); }
+/* A text button rather than a .btn: it sits inside a tinted strip where a filled/outlined button
+   would dominate the row it is attached to. min-height keeps the 40px tap floor (03 Part B). */
+.linger-undo-btn {
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  min-height: 40px;
+  padding: 0 6px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.linger-undo-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* "Show completed" — the recovery half of D47. Sits at the foot of the list, inside the same
+   96px add-button clearance .task-list already reserves. */
+.completed-section { margin-top: 14px; }
+.completed-toggle {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 40px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.completed-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.completed-list { display: grid; gap: 2px; }
+.completed-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);   /* D21: never an implicit `auto` content track */
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  border-top: 1px solid var(--line);
+}
+.completed-main { display: grid; gap: 1px; min-width: 0; }
+.completed-title {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+  overflow-wrap: anywhere;
+}
+.completed-when { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
 
 /* ---- Detail popup + add/edit form (task 2.U4). Built entirely from existing 03 tokens
    (paper-raised/line/ink/danger + .card/.btn) — no new hex. Detail-first: tap a row →
@@ -373,6 +523,10 @@ body {
   max-height: 85dvh;
   overflow-y: auto;
   border-radius: var(--radius) var(--radius) 0 0;   /* sheet on phone */
+  /* 7.P2: the sheet is anchored to the screen bottom inside a position:fixed host, so its last
+     row of actions would land under the home indicator. 13px is .card's own padding, kept so the
+     inset ADDS to it rather than replacing it; fallback 0px = the pre-7.P2 13px. */
+  padding-bottom: calc(13px + env(safe-area-inset-bottom, 0px));
 }
 @media (min-width: 720px) {
   .modal-card {
@@ -380,6 +534,7 @@ body {
     bottom: auto;
     transform: translate(-50%, -50%);
     border-radius: var(--radius);
+    padding-bottom: 13px;   /* 7.P2: centered dialog, not a bottom sheet — no inset applies */
   }
 }
 .modal-title {
@@ -538,8 +693,268 @@ input[type="datetime-local"].form-control {
    but two actions (Edit/Cancel, .btn.sm.ghost) instead of one status button — no new hex. */
 .occurrence-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
+/* ---- Calendar Month view (task 5.M1) ----
+   7-col grid via minmax(0,1fr) tracks, never aspect-ratio (03 Part B: unbounded aspect-ratio
+   was the other app's overflow bug) — cell height comes from min-height + padding instead.
+   Day-detail sits below the grid on phone, beside it (side panel) at/above 720px — same
+   7-col grid both places, density is the only difference (03 Part B "Deadlines/Calendar"). */
+.calendar-view { display: flex; flex-direction: column; gap: 14px; }
+.cal-nav { display: flex; align-items: center; gap: 8px; }
+.cal-nav > * { min-width: 0; } /* a native date input's intrinsic width otherwise won't shrink
+                                   below content size in a flex row, forcing the nav to overflow */
+.cal-month-label {
+  flex: 1; text-align: center; font-family: var(--display); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.cal-body { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+@media (min-width: 720px) {
+  .cal-body { flex-direction: row; align-items: flex-start; }
+  .cal-detail-panel { flex: 0 0 clamp(220px, 30vw, 320px); }
+}
+.cal-grid-col { flex: 1; min-width: 0; }
+
+.cal-weekday-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: 4px; }
+.cal-weekday { text-align: center; font-family: var(--mono); font-size: 11px; color: var(--ink-soft); text-transform: uppercase; }
+
+.cal-month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.cal-day {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  min-height: 44px; padding: 5px 2px 6px; min-width: 0;
+  background: var(--paper-raised); border: 1px solid var(--line); border-radius: 6px;
+  font-family: var(--sans); cursor: pointer;
+  /* .pane already carries touch-action:manipulation, but WebKit doesn't reliably suppress
+     double-tap-zoom on a nested tappable element from an ancestor rule alone — it needs to be
+     set on the actual tap target too (2026-09-19: reported still zooming on a day cell and on a
+     day-detail task row). */
+  touch-action: manipulation;
+}
+.cal-day-out { opacity: .45; }
+.cal-day-today { background: var(--accent-wash); }
+.cal-day-num { font-family: var(--mono); font-size: 13px; color: var(--ink); }
+.cal-day-today .cal-day-num { font-weight: 700; color: var(--accent); }
+.cal-dots { display: flex; align-items: center; gap: 3px; min-height: 8px; }
+.cal-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+.cal-dot-more { font-family: var(--mono); font-size: 9px; color: var(--ink-soft); }
+
+/* Task 7.U3 (D45): emoji markers. The element keeps its .cal-dot identity — colour mode never
+   reaches these rules, so the grid renders exactly as 5.M1 left it — and this modifier drops the
+   6px circle in favour of the glyph. 11px is the existing chip/weekday size (03 Part B), picked
+   for geometry as much as tone: three glyphs + two 3px gaps = 39px, which still fits the ~41px of
+   content a 360px phone gives a day cell. Whether an 11px emoji READS better than a colour dot at
+   that size is the 7.INT phone judgement the spec defers. */
+.cal-dot-emoji {
+  width: auto; height: auto; border-radius: 0;
+  font-size: 11px; line-height: 1;
+}
+/* Sub-step 2: a glyph cannot carry --danger as a fill the way a dot can, so an overdue item keeps
+   the red as a ring + wash behind it. Both are existing tokens — no new hex. */
+.cal-dot-overdue {
+  background: var(--danger-wash);
+  box-shadow: 0 0 0 1px var(--danger);
+  border-radius: 4px;
+}
+/* Clip guard for emoji mode only in practice: colour mode's three 6px dots (24px) never come
+   near a cell's width, so this changes nothing there, but a wide glyph must not push the cell. */
+.cal-dots { max-width: 100%; overflow: hidden; }
+
+/* Month runway highlight (task 5.M2, D35): yellow reuses the amber wash, red is --danger —
+   no new hex. Red is listed after cal-day-today so it wins on the (rare) day-of-deadline-is-
+   today overlap; the deadline day matters more than the plain today marker there. */
+.cal-day-runway-yellow { background: var(--accent-wash); }
+.cal-day-runway-red { background: var(--danger); }
+.cal-day-runway-red .cal-day-num { color: var(--paper); }
+.cal-runway-note { margin: -6px 0 4px; font-size: 12px; color: var(--ink-soft); }
+/* 7.R3/D46: the runway now survives prev/next, so it needs a visible way out. Sits with the
+   note, above the grid; the global .btn/.btn.ghost rules carry its colour (no new hex). */
+.cal-runway-dismiss { align-self: flex-start; margin: 0 0 6px; min-height: 40px; }
+
+.cal-detail-panel {
+  background: var(--paper-raised); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 14px; min-width: 0;
+}
+.cal-detail-heading { margin: 0 0 8px; font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--ink-soft); }
+.cal-detail-list { display: flex; flex-direction: column; gap: 8px; }
+.cal-detail-row {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  border-left: 3px solid transparent; padding: 4px 0 4px 8px; min-width: 0;
+  touch-action: manipulation; /* see .cal-day comment — same nested-tap-target fix */
+}
+.cal-detail-title { min-width: 0; overflow-wrap: anywhere; }
+.cal-detail-meta { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+
+/* ---- Calendar Day/Week time-grid skeleton (task 5.G1, D32) ----
+   Mode switcher (Month/Week/Day) sits above the Month nav or the Day/Week nav depending on
+   `_mode`. The grid itself is a flex row of columns (never CSS grid-of-columns — each column
+   just needs to be minmax(0,1fr) fluid per D21, no track-alignment magic needed): a fixed 64px
+   time-label column (03 Part B "right-aligned in a 64px column"), then one (Day) or seven
+   (Week) date columns. Each column stacks an optional header, the all-day/multi-day banner
+   (5.G2 fills it in), then the 32-row 06:00-22:00 grid — header/banner sections use matching
+   min-heights across columns so rows line up without needing shared grid tracks. */
+.cal-mode-nav { display: flex; gap: 6px; margin-bottom: 8px; }
+.cal-mode-btn-active { background: var(--ink); color: var(--paper); }
+/* Icon-only jump-to-date: the formatted `.cal-month-label` already shows the date in prose right
+   next to this control, so the native input's own date text was a duplicate. Hiding the
+   ::-webkit-datetime-edit sub-parts (an earlier attempt) assumed the browser renders that text
+   the way desktop Chrome/Safari do — iOS Safari doesn't expose a separate styleable
+   picker-indicator at all, so that approach left no icon visible on-device (2026-09-19 phone
+   retest). Robust cross-browser fix instead: draw our own icon and make the real
+   `<input type="date">` fully transparent on top of it — opacity:0 hides its native rendering
+   regardless of how any given browser draws it internally, no vendor pseudo-elements relied on.
+   The input is still the real element being tapped, so the actual native date picker (D39 — load-
+   bearing for phone date entry) still opens normally; only its paint is invisible. */
+.cal-jump-wrap {
+  position: relative; flex: 0 0 40px; width: 40px; height: 40px; min-height: 40px;
+  border: 1px solid var(--line-strong); border-radius: 6px; background: var(--paper-raised);
+}
+.cal-jump-icon {
+  position: absolute; inset: 0; margin: auto; width: 18px; height: 18px; pointer-events: none;
+  background-color: var(--ink-soft);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7 2v2H5a2 2 0 0 0-2 2v2h18V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zM3 10v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V10H3zm4 3h3v3H7v-3zm7 0h3v3h-3v-3z'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7 2v2H5a2 2 0 0 0-2 2v2h18V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zM3 10v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V10H3zm4 3h3v3H7v-3zm7 0h3v3h-3v-3z'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+.cal-jump-input {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0;
+  border: 0; background: transparent; color: transparent; opacity: 0; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+}
+
+/* Day/Week nav (5.G1) defaults to the shared one-row .cal-nav shape; the label's own text can
+   run much longer than Month's ("Mon, September 21 2026" vs. a short month name), and with
+   Prev/Next/Today/jump already claiming most of a phone-width row there's no room left for it
+   even with ellipsis — so Day/Week always stacks the label on its own row instead (2026-09-19
+   phone-check finding). Month's buildNav()/.cal-nav is untouched, its short label still fits. */
+.cal-nav-stacked { flex-direction: column; align-items: stretch; }
+.cal-nav-label-row { width: 100%; text-align: center; }
+.cal-nav-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.timegrid {
+  display: flex; gap: 2px; min-width: 0;
+  /* user-select is inherited, so putting it here (rather than only on -draggable) also stops a
+     long-press on a non-draggable routine/recurring occurrence block from popping iOS's native
+     text-selection callout — that was happening even though the block was never going to drag
+     (2026-09-19 phone-check finding). Covers banner chips and time labels too. */
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+.timegrid-col { min-width: 0; display: flex; flex-direction: column; }
+.timegrid-labelscol { flex: 0 0 64px; }
+.timegrid-daycol { flex: 1 1 0; min-width: 0; }
+
+.timegrid-header-spacer, .timegrid-daycol-header {
+  min-height: 28px; display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 12px; color: var(--ink-soft); padding: 0 2px;
+  border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Week mode packs 7 day columns + the 64px label column into one phone-width row — at narrow
+   widths the header text has too little room per column and visually crowds/overlaps its
+   neighbour; shrink the label column and header type size so 7 columns actually fit (D21). */
+@media (max-width: 400px) {
+  .timegrid-week .timegrid-labelscol { flex-basis: 40px; }
+  .timegrid-week .timegrid-daycol-header { font-size: 10px; letter-spacing: -0.02em; }
+}
+.timegrid-daycol-today .timegrid-daycol-header { color: var(--accent); font-weight: 700; }
+
+.timegrid-banner-spacer, .timegrid-banner {
+  min-height: 22px; border-bottom: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 2px;
+}
+/* All-day / multi-day event chips (5.G2, D33) — same task.color solid fill as a timed block. */
+.timegrid-banner-chip {
+  font-family: var(--sans); font-size: 11px; color: var(--paper);
+  padding: 2px 6px; border-radius: 4px; cursor: pointer; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Timed Slot/event/routine-occurrence block (5.G2, D32): absolutely positioned by percentage
+   of the 06:00-22:00 window (same convention as .timegrid-nowline), side-by-side via
+   lane/laneCount from layoutDay. Fill is task.color solid; a routine occurrence's done/
+   skipped/moved status reuses the existing --positive/--ink-faint tokens (03 "Progress bar" /
+   ".occurrence-status", no new hex). */
+.timegrid-block {
+  position: absolute; z-index: 1; border-radius: 4px; padding: 2px 4px; overflow: hidden;
+  color: var(--paper); font-family: var(--sans); font-size: 11px; line-height: 1.3;
+  cursor: pointer; box-sizing: border-box; border: 1px solid var(--line-strong);
+}
+.timegrid-block-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timegrid-block.status-done { opacity: 0.55; border-color: var(--positive); }
+.timegrid-block.status-skipped, .timegrid-block.status-moved { opacity: 0.55; border-color: var(--ink-faint); }
+
+/* Drag-to-move/resize (5.X1, D34 enhancement, D42 gate) — only a Slot or non-recurring event's
+   own block ever gets these classes; a routine/recurring-event occurrence never does. touch-
+   action:none stops the browser treating a drag start as a page-scroll gesture. */
+.timegrid-block-draggable { touch-action: none; cursor: grab; }
+.timegrid-block-resize-handle { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: ns-resize; touch-action: none; }
+.timegrid-block-resize-handle::after {
+  content: ""; position: absolute; left: 50%; bottom: 2px; width: 20px; height: 3px;
+  transform: translateX(-50%); border-radius: 2px; background: var(--paper); opacity: .6;
+}
+
+.timegrid-rows { position: relative; display: grid; grid-template-rows: repeat(32, minmax(20px, 1fr)); }
+.timegrid-row { border-top: 1px solid var(--line); }
+.timegrid-row-half { border-top: 1px solid var(--line); opacity: .5; }
+.timegrid-label-row {
+  font-family: var(--mono); font-size: 10px; color: var(--ink-soft);
+  display: flex; align-items: flex-start; justify-content: flex-end; padding-right: 6px;
+}
+
+/* "Now" line: an amber highlighter mark (--accent, reserved for today/active-block emphasis
+   per 03 Part B) positioned by percentage so it's independent of row-height rounding. */
+.timegrid-nowline { position: absolute; left: 0; right: 0; height: 2px; background: var(--accent); z-index: 2; }
+.timegrid-nowline::before {
+  content: ""; position: absolute; left: -3px; top: -3px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--accent);
+}
+
+/* ---- Deadlines countdown list (task 5.D1, D35) ----
+   Plain rows, soonest-first (list order comes from deadlineCountdown, 5.L2). Overdue rows get
+   the 03 Part B "Overdue: --danger text with --danger-wash background chip" treatment,
+   independent of the task's own colour — same rule as the Tasks-view Overdue section (D31). */
+.deadline-list { display: flex; flex-direction: column; gap: 8px; }
+.deadline-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: baseline; gap: 10px;
+  width: 100%; min-height: 44px; padding: 10px 12px; min-width: 0;
+  background: var(--paper-raised); border: 1px solid var(--line); border-radius: var(--radius);
+  font-family: var(--sans); text-align: left; cursor: pointer;
+}
+.deadline-row-title { min-width: 0; overflow-wrap: anywhere; }
+.deadline-row-date { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+.deadline-row-countdown { font-family: var(--mono); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.deadline-row-overdue {
+  color: var(--danger); background: var(--danger-wash); border-color: transparent;
+}
+.deadline-row-overdue .deadline-row-date,
+.deadline-row-overdue .deadline-row-countdown { color: var(--danger); }
+
+/* ---- Settings/Sync connect form + Push/Pull (tasks 6.U1/6.U2, D43/D16) ----
+   Plain stacked form reusing .form-field/.form-control (03 Part B) and .btn — no new input
+   chrome. Status line colour swaps --positive/--danger on a short transition, disabled by the
+   blanket prefers-reduced-motion rule below like every other transition in this file. Push/Pull
+   sit in a row and stay disabled (dimmed, not-allowed cursor) until Connect succeeds. */
+.settings-form { max-width: 420px; display: flex; flex-direction: column; gap: 14px; }
+.settings-status {
+  margin: 0; font-family: var(--sans); font-size: 13px; color: var(--ink-soft);
+  transition: color 120ms;
+}
+.settings-status.ok { color: var(--positive); }
+.settings-status.error { color: var(--danger); }
+.settings-sync-row { display: flex; gap: 10px; }
+
+/* Day-markers picker (task 7.U3): the mode select and the 8 category rows reuse .settings-form /
+   .form-field / .form-control wholesale (03 Part B, including the 16px input floor), so the only
+   new geometry is the swatch + input row. No new hex: the swatch is painted from TASK_COLORS in
+   js/views/settings.js, exactly as 2.U5's colour picker does. */
+.settings-heading { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+.settings-emoji-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.settings-emoji-swatch { width: 18px; height: 18px; border-radius: 50%; flex: 0 0 auto; }
+.settings-emoji-input { flex: 1 1 0; min-width: 0; } /* basis 0, not .form-control's width:100% — the row never overflows next to its swatch */
+button:disabled { opacity: .5; cursor: not-allowed; }
+
 /* ---- Focus and motion (03 Part B accessibility floor, verbatim) ---- */
 input:focus, select:focus, textarea:focus, button:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 1px;
 }
+/* A timegrid block (5.G2) is a keyboard-focusable div[role=button], not a <button> — the
+   verbatim 03 rule above doesn't reach it, so it needs its own focus-visible outline (same
+   --accent treatment) to keep the accessibility floor intact. */
+.timegrid-block:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

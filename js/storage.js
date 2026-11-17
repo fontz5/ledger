@@ -1,9 +1,12 @@
-// Storage layer & providers (Ledger v2 data layer).
+// Storage layer & providers (PIN v2 data layer).
 // Contract locked in docs/03_DOMAIN_CONSTANTS.md Part A ("Storage layer") and Part C ("Storage interface").
 // This is the ONLY module allowed to touch localStorage or fetch().
 
 import { makeAppState, migrate } from "./state.js";
 
+// FROZEN (D44): the app is named PIN, but these four key strings stay `ledger.*` forever —
+// renaming one makes the app read a key nobody has ever written, stranding every existing
+// user's data under the old name (the D29 failure mode). They are invisible to the user.
 export const STORAGE_KEY = "ledger.state"; // the single key holding the entire AppState blob
 export const CORRUPT_SUFFIX = ".corrupt"; // <key>.corrupt preserves a blob we could not parse
 
@@ -137,21 +140,77 @@ export class LocalStorageProvider extends StorageProvider {
   }
 }
 
-// Stub only: methods present so callers can wire against the interface now,
-// but real network I/O is deferred to Step 6 (D26 contract).
+// Real network client, built against the D26 contract (03 Part C). `authenticate`/`load`/`save` are
+// all real as of 6.P1/6.P2/6.P3. `fetch` is injectable (constructor option) so this is unit-testable
+// without a real network call — Google is unreachable from this dev container.
 export class SheetsProvider extends StorageProvider {
-  constructor({ execUrl, token } = {}) {
+  constructor({ execUrl, token, fetch: fetchImpl } = {}) {
     super();
     this.execUrl = execUrl;
     this.token = token;
+    // .bind(globalThis): native fetch is a WindowOrWorkerGlobalScope method, and calling it later
+    // as `this._fetch(...)` invokes it with `this` = the SheetsProvider instance, not the global
+    // object. Chrome tolerates that; Safari/WebKit throws "TypeError: Illegal invocation" for the
+    // wrong receiver — silently, since it's caught by this class's own try/catch, so the failure
+    // never even reaches the network (found via a real Safari session in 6.U-INT). A test-injected
+    // mock `fetchImpl` is an ordinary function with no receiver enforcement, so it's unaffected.
+    this._fetch = fetchImpl || (typeof fetch === "function" ? fetch.bind(globalThis) : undefined);
   }
+  // Never throws (03 Part C): a thrown/network error or {ok:false,...} both resolve false.
+  // On {ok:true,...}, remembers the accepted token as this.token.
   async authenticate(passphrase) {
-    throw new Error("deferred to Step 6");
+    const token = passphrase ?? this.token;
+    try {
+      const res = await this._fetch(this.execUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "load", token }),
+      });
+      const body = await res.json();
+      if (!body || body.ok !== true) return false;
+      this.token = token;
+      return true;
+    } catch {
+      return false;
+    }
   }
+  // Returns exactly {version, tasks, slots} — NEVER a full AppState; `settings` is caller-supplied
+  // (D26 rule 4 / D43: Sheets never carries `settings`). Throws on {ok:false,...} or a malformed
+  // reply (missing/non-array tasks/slots) — never hands back a partial/empty result silently.
   async load() {
-    throw new Error("deferred to Step 6");
+    const res = await this._fetch(this.execUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "load", token: this.token }),
+    });
+    const body = await res.json();
+    if (!body || body.ok !== true || !Array.isArray(body.tasks) || !Array.isArray(body.slots)) {
+      throw new Error((body && body.error) || "SheetsProvider.load: malformed response");
+    }
+    return { version: body.version, tasks: body.tasks, slots: body.slots };
   }
+  // Client-side guard BEFORE calling fetch (defense in depth on top of 6.S3's server-side D26 rule 2
+  // check): tasks/slots must be arrays or this throws locally without sending a request. Never sends
+  // state.settings (D26 rule 4 / D43). {ok:true} -> true; {ok:false,error} -> throws that message.
   async save(state) {
-    throw new Error("deferred to Step 6");
+    if (!Array.isArray(state.tasks) || !Array.isArray(state.slots)) {
+      throw new Error("SheetsProvider.save: state.tasks/state.slots must be arrays");
+    }
+    const res = await this._fetch(this.execUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "save",
+        token: this.token,
+        version: state.version,
+        tasks: state.tasks,
+        slots: state.slots,
+      }),
+    });
+    const body = await res.json();
+    if (!body || body.ok !== true) {
+      throw new Error((body && body.error) || "SheetsProvider.save: save failed");
+    }
+    return true;
   }
 }

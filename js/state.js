@@ -1,4 +1,4 @@
-// State schema & record factories (Ledger v2 data layer).
+// State schema & record factories (PIN v2 data layer).
 // Field names/types/defaults are locked in docs/03_DOMAIN_CONSTANTS.md Part A — do not re-derive here.
 
 export const TASK_TYPES = ["finite", "routine", "event"];
@@ -30,7 +30,11 @@ export function makeAppState() {
     version: 1,
     tasks: [],
     slots: [],
-    settings: { providerType: "local", sheetUrl: "" },
+    settings: { providerType: "local", sheetUrl: "", token: "" },
+    // D45: user display preferences are a SIBLING of settings, never nested inside it — `settings`
+    // is excluded from every sync payload (D26 rule 4) and carries the token (D43), so a preference
+    // in there could never travel between devices. Local in Step 7; Step 8 teaches sync to carry it.
+    prefs: { marker: "color", emoji: {} },
   };
 }
 
@@ -94,8 +98,17 @@ export function makeSlot({ date, start, durationMin = 60, taskId } = {}) {
 // Upgrades a legacy v1 blob ({tasks:[{id,title,due,pri,done,parentId,createdAt}],slots:[{id,date,hour,taskId}]})
 // to the current v2 AppState. Already-current state (version >= 1) is left untouched (idempotent).
 export function migrate(state) {
-  if (state && typeof state.version === "number" && state.version >= 1) {
-    return state;
+  if (state && Number(state.version) >= 1) {
+    // D43: default-fill settings.token on an already-current state too (not just the legacy
+    // upgrade path below) so a pre-D43 v2 blob never crashes on a missing field; a real token is
+    // preserved verbatim (defaults come first, then the actual settings override them).
+    return {
+      ...state,
+      settings: { providerType: "local", sheetUrl: "", token: "", ...state.settings },
+      // D45: same default-fill pattern for prefs — a pre-D45 v2 blob gains the defaults, an
+      // existing prefs overrides them field-by-field and so survives byte-unchanged.
+      prefs: { marker: "color", emoji: {}, ...state.prefs },
+    };
   }
 
   const src = state || {};
@@ -141,6 +154,31 @@ export function migrate(state) {
     version: 1,
     tasks,
     slots,
-    settings: src.settings ?? { providerType: "local", sheetUrl: "" },
+    settings: { providerType: "local", sheetUrl: "", token: "", ...src.settings },
+    prefs: { marker: "color", emoji: {}, ...src.prefs }, // D45
   };
+}
+
+// 7.X1: parse an exported file back into an AppState, or THROW. Lives here rather than in
+// logic.js because sub-step 4 routes the result through the existing `migrate()` and logic.js must
+// stay import-free (02_TECH_STACK: state.js owns the migration; logic.js owns pure algorithms).
+// Validation mirrors D26 rule 2's non-destructive instinct: a malformed blob must never be able to
+// wipe the user's data, so anything whose `tasks`/`slots` are not arrays is REJECTED outright and
+// nothing is returned. Any `settings` in the file is dropped, never adopted — the exporter never
+// writes one, and a hand-edited file must not be able to inject a sheetUrl or token (golden rule 6).
+export function parseImportedState(text) {
+  let blob;
+  try {
+    blob = JSON.parse(text);
+  } catch (e) {
+    throw new Error("That file is not valid JSON.");
+  }
+  if (!blob || typeof blob !== "object" || Array.isArray(blob)) {
+    throw new Error("That file does not look like a PIN export.");
+  }
+  if (!Array.isArray(blob.tasks) || !Array.isArray(blob.slots)) {
+    throw new Error("That file does not look like a PIN export (missing tasks/slots).");
+  }
+  const { settings, ...rest } = blob;
+  return migrate(rest);
 }

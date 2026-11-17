@@ -2,8 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
-<title>Ledger</title>
+<!-- viewport-fit=cover lets the page paint under the notch/home-indicator in standalone mode so
+     env(safe-area-inset-*) reports real values (task 7.P2 consumes them). maximum-scale=1.0 is
+     retained deliberately — D39 and 03 Part B both require it; do not drop it. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+<title>PIN</title>
+<!-- Home-screen shell (task 7.P1). status-bar-style is "default" (opaque, content starts below the
+     status bar) rather than "black-translucent": translucent needs env(safe-area-inset-top) on the
+     header, which is task 7.P2's scope — shipping it now would leave the header under the clock. -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#F6F5F1" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -12,13 +23,14 @@
 <body>
 <div class="shell">
   <header class="header">
-    <span class="logo">Led<b>ger</b></span>
+    <span class="logo">P<b>IN</b></span>
   </header>
 
   <nav class="nav" aria-label="Views">
     <button class="tab" data-view="tasks" aria-current="page">Tasks</button>
     <button class="tab" data-view="deadlines">Deadlines</button>
     <button class="tab" data-view="calendar">Calendar</button>
+    <button class="tab" data-view="settings">Settings</button>
   </nav>
 
   <main class="pane" id="pane"></main>

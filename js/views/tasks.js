@@ -68,13 +68,112 @@ import {
   eventSummary,
   cancelEventOccurrence,
   overrideEventOccurrence,
+  isCompletedHidden,
+  completedHiddenRoots,
+  completedAtOf,
+  HIDE_DELAY_MS,
+  HIDE_DELAY_CONTAINER_MS,
 } from "../logic.js";
 import { TASK_COLORS, TASK_COLOR_NAMES, DEFAULT_COLOR, makeTask } from "../state.js";
+
+// Task 7.U4 (D47): a checked FINITE task lingers with its strike-through for a grace delay and
+// is then hidden from the tree; unchecking inside the window cancels the hide entirely; hidden
+// tasks stay reachable — and un-checkable — through the "Show completed" disclosure at the foot
+// of the list. The hide is render-only (isCompletedHidden), so every percentage is unaffected:
+// progressOf/breakdownOf read the tasks array, never the DOM. Routines and events never hide
+// (D25/D47 constraint 1). Checking a container hides its whole subtree with ONE timer on the
+// container, not one per descendant (D47 constraint 2), and the pending row grows an obvious
+// "Undo" affordance while the window is open.
 
 // ---- View instance state (set by mountTasksView; used by the mutation handlers) ----
 let _pane = null;
 let _state = null;
 let _onChange = () => {};
+
+// 7.U4 pending hides: taskId -> setTimeout handle. A Map is also the `lingering` set the pure
+// isCompletedHidden/completedHiddenRoots take (they use only `.has(id)`), so there is ONE
+// structure and no Set/Map pair that can drift apart. It lives at module scope on purpose: the
+// views rebuild their whole DOM on every change (rerender), so a timer parked on an element
+// would be destroyed by the next re-render mid-window — the DOM is rebuilt, the pending set is
+// not (D47 sub-step 5).
+const _lingerTimers = new Map();
+// Disclosure state for the "Show completed" list — survives re-renders, resets on reload.
+let _showCompleted = false;
+// The D47 grace delays. Overridable through mountTasksView so a test does not have to sleep for
+// the real window; app.js passes neither, so the shipped app always uses logic.js's constants.
+let _delays = { leaf: HIDE_DELAY_MS, container: HIDE_DELAY_CONTAINER_MS };
+// "as if nothing were lingering" — the question pruneLingering and hideSubjectFor both ask.
+// Never written to.
+const NONE = new Set();
+
+// Local calendar date, never toISOString() (UTC shifts the date near midnight). D47's amended
+// predicate needs it to tell a past event from a pending one.
+function todayISO() {
+  return new Date().toLocaleDateString("en-CA");
+}
+
+// Hide `id` after `delayMs`. Replaces any pending timer for the same id so a re-check inside an
+// open window restarts the window instead of stacking two timers on one row.
+function scheduleHide(id, delayMs) {
+  clearHide(id);
+  const handle = setTimeout(() => {
+    _lingerTimers.delete(id);
+    if (_pane) rerender();
+  }, delayMs);
+  _lingerTimers.set(id, handle);
+}
+
+function clearHide(id) {
+  const handle = _lingerTimers.get(id);
+  if (handle !== undefined) {
+    clearTimeout(handle);
+    _lingerTimers.delete(id);
+  }
+}
+
+// Drops every pending hide. Exported as the view's teardown: a timer that outlives the document
+// it was going to re-render (a test harness, a torn-down page) would fire into nothing.
+export function cancelPendingHides() {
+  for (const id of [..._lingerTimers.keys()]) clearHide(id);
+}
+
+// Called at the top of every render, and it — not the individual handlers — is what makes the
+// pending set safe across re-renders (D47 sub-step 5, "a mutation during a pending hide must not
+// leave an orphaned timer"). Any id whose task has been deleted, retyped, or un-done by ANY
+// route (the detail popup's Delete, "Show completed", an edit, an import that replaces the whole
+// state) stops being a legitimate pending hide, and loses its timer here rather than firing
+// later against whatever now occupies that place in the tree.
+function pruneLingering(today) {
+  for (const id of [..._lingerTimers.keys()]) {
+    const t = _state.tasks.find((x) => x.id === id);
+    // The SAME predicate the renderer uses, asked with nothing lingering: "would this row be
+    // hidden right now?" A no covers every way a pending hide stops being legitimate — deleted,
+    // un-done, retyped, or (D47 amendment) newly blocked by a pending event added underneath it.
+    if (!t || !isCompletedHidden(_state.tasks, t, today, NONE)) clearHide(id);
+  }
+}
+
+// The node that is actually about to disappear when `id` is checked: the HIGHEST ancestor that
+// this check just made hideable. Checking the last open child of a container completes the
+// CONTAINER too, so the container — not the row the user tapped — is what vanishes, and therefore
+// what owns the grace window, the single timer and the cancel affordance.
+// It asks the renderer's own predicate rather than re-deriving "done", which is what keeps the
+// D47 amendment honest: a container held on the tree by a pending event is NOT hideable, so the
+// walk stops below it and the window opens on the deepest thing that will really go. (`isCompleted
+// Hidden` is monotone upward here — a pending event under a node blocks every ancestor too — so
+// taking the highest match can never skip past a blocked one.)
+// Returns null when nothing became hideable, in which case no window opens at all.
+function hideSubjectFor(id, today) {
+  let subject = null;
+  let cur = _state.tasks.find((x) => x.id === id);
+  const seen = new Set();
+  while (cur && !seen.has(cur.id)) {           // cycle guard (D24)
+    seen.add(cur.id);
+    if (isCompletedHidden(_state.tasks, cur, today, NONE)) subject = cur;
+    cur = cur.parentId === null ? null : _state.tasks.find((t) => t.id === cur.parentId);
+  }
+  return subject;
+}
 
 function colorOf(task) {
   return TASK_COLORS[task.color] ?? TASK_COLORS[DEFAULT_COLOR[task.type]];
@@ -119,7 +218,51 @@ function buildCheckbox(node, state) {
 
 function toggleDone(id, value) {
   setDoneCascade(_state.tasks, id, value);
+  if (value) {
+    // 7.U4: ONE timer, on the node that is about to disappear. A container's cascade marks every
+    // descendant done, but only the subject gets a timer — so the subtree hides once, not once
+    // per descendant — and a container's window is the longer of the two delays.
+    const subject = hideSubjectFor(id, todayISO());
+    if (subject) {
+      const isContainer = childrenOf(_state.tasks, subject.id).length > 0;
+      scheduleHide(subject.id, isContainer ? _delays.container : _delays.leaf);
+    }
+  } else {
+    // Unchecking inside the grace window cancels the pending hide entirely. The row's own id is
+    // cleared here; a timer parked on an ancestor that this un-check just un-completed is cleared
+    // by pruneLingering() on the render that follows.
+    clearHide(id);
+  }
   commit();
+}
+
+// The cancel affordance for an open grace window (D47 sub-step 4: "make the cancel affordance
+// obvious while it is pending"). A full-width strip under the row, so it is a SIBLING of
+// `.task-main` and its button can never bubble into the row's open-detail listener. role=status +
+// aria-live announces the window to a screen reader, which otherwise gets no hint that the row is
+// about to leave. "Undo" un-checks through the same setDoneCascade path the checkbox uses, so the
+// whole subtree comes back, not just the subject row.
+function buildLingerBar(node) {
+  const bar = document.createElement("div");
+  bar.className = "task-linger";
+  bar.setAttribute("role", "status");
+  bar.setAttribute("aria-live", "polite");
+
+  const n = countDescendants(node.id);
+  const msg = document.createElement("span");
+  msg.className = "linger-text";
+  msg.textContent = n > 0 ? `Completed — hiding ${n + 1} items` : "Completed — hiding";
+  bar.appendChild(msg);
+
+  const undo = document.createElement("button");
+  undo.type = "button";
+  undo.className = "linger-undo-btn";
+  undo.textContent = "Undo";
+  undo.setAttribute("aria-label", `Undo completing "${node.title}"`);
+  undo.addEventListener("click", () => toggleDone(node.id, false));
+  bar.appendChild(undo);
+
+  return bar;
 }
 
 function renderRow(tasks, node, isContainer) {
@@ -216,17 +359,28 @@ function renderRow(tasks, node, isContainer) {
   return { row, controls };
 }
 
-function renderNode(tasks, node) {
+function renderNode(tasks, node, today) {
   const kids = childrenOf(tasks, node.id);
+  // 7.U4: `isContainer` stays STRUCTURAL — it counts every child, hidden or not. A container
+  // whose completed subtasks are hidden is still one card with a chevron and a breakdown line,
+  // and the breakdown/progress numbers still include the hidden children (the hide is
+  // render-only). Only the list of child nodes rendered below is filtered.
   const isContainer = kids.length > 0;
 
   const wrap = document.createElement("div");
-  wrap.className = "task-node";
+  // Task 7.U1 sub-step 1: a class hook for "a node that HAS children", so CSS can draw ONE
+  // box around the whole container (its row plus every descendant) without restructuring the
+  // DOM. Sub-steps 2+4: the card's 3px left edge carries this task's colour (D22) — the
+  // header row's own accent is suppressed in CSS so the two don't stack into a 6px band,
+  // while the row keeps its colour wash on top of the card's fill.
+  wrap.className = isContainer ? "task-node has-children" : "task-node";
+  if (isContainer) wrap.style.borderLeftColor = colorOf(node).solid;
 
   const { row, controls } = renderRow(tasks, node, isContainer);
 
   if (!isContainer) {
     wrap.appendChild(row);
+    if (_lingerTimers.has(node.id)) wrap.appendChild(buildLingerBar(node));
     return wrap;
   }
 
@@ -253,7 +407,10 @@ function renderNode(tasks, node) {
     body.appendChild(line);
   }
 
-  for (const kid of kids) body.appendChild(renderNode(tasks, kid));
+  for (const kid of kids) {
+    if (isCompletedHidden(tasks, kid, today, _lingerTimers)) continue;   // 7.U4/D47, render-only
+    body.appendChild(renderNode(tasks, kid, today));
+  }
 
   toggle.addEventListener("click", () => {
     const expanded = toggle.getAttribute("aria-expanded") === "true";
@@ -267,6 +424,7 @@ function renderNode(tasks, node) {
   });
 
   wrap.appendChild(row);
+  if (_lingerTimers.has(node.id)) wrap.appendChild(buildLingerBar(node));
   wrap.appendChild(body);
   return wrap;
 }
@@ -340,25 +498,115 @@ function renderOverdueSection(tasks, today) {
 // Builds the tasks-view element for a state (05 §2.U2 tree + §2.U3 overdue section).
 // Pure DOM construction from state + logic.js — no storage, no globals. `today` is
 // computed ONCE here as a local YYYY-MM-DD (never toISOString — timezone bugs).
-export function renderTasks(state) {
-  const today = new Date().toLocaleDateString("en-CA");
+export function renderTasks(state, today = todayISO()) {
   const list = document.createElement("div");
   list.className = "task-list";
   const overdue = renderOverdueSection(state.tasks, today);
   if (overdue) list.appendChild(overdue);
+  let shown = 0;
   for (const top of state.tasks.filter((t) => t.parentId === null)) {
-    list.appendChild(renderNode(state.tasks, top));
+    if (isCompletedHidden(state.tasks, top, today, _lingerTimers)) continue;   // 7.U4/D47
+    list.appendChild(renderNode(state.tasks, top, today));
+    shown += 1;
+  }
+  // 7.U4: the mandatory way back. Without this the hide is deletion with a friendlier
+  // animation (D47), so the section renders whenever anything is hidden — and only then, so a
+  // user who has completed nothing never sees an empty affordance.
+  const hidden = completedHiddenRoots(state.tasks, today, _lingerTimers);
+  if (hidden.length) {
+    if (shown === 0) {
+      const done = document.createElement("p");
+      done.className = "empty-state";
+      done.textContent = "All done — nothing open.";
+      list.appendChild(done);
+    }
+    list.appendChild(renderCompletedSection(state.tasks, hidden));
   }
   return list;
+}
+
+// The "Show completed" disclosure (D47). A collapsed button carrying the count, and a list of the
+// hidden subtree ROOTS newest-first by completedAt — a checked container appears once, not once
+// per descendant. Every row carries a real CHECKED checkbox, so the way back is the same gesture
+// that put the task here: unchecking restores it (and its whole subtree) to the tree.
+function renderCompletedSection(tasks, hidden) {
+  const section = document.createElement("section");
+  section.className = "completed-section";
+  section.setAttribute("aria-label", "Completed");
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "completed-toggle";
+  toggle.setAttribute("aria-expanded", String(_showCompleted));
+  toggle.textContent = `${_showCompleted ? "Hide" : "Show"} completed (${hidden.length})`;
+  toggle.addEventListener("click", () => {
+    _showCompleted = !_showCompleted;
+    rerender();
+  });
+  section.appendChild(toggle);
+
+  const body = document.createElement("div");
+  body.className = "completed-list";
+  body.hidden = !_showCompleted;
+  for (const node of hidden) body.appendChild(renderCompletedRow(tasks, node));
+  section.appendChild(body);
+
+  return section;
+}
+
+function renderCompletedRow(tasks, node) {
+  const row = document.createElement("div");
+  row.className = "completed-row";
+  row.dataset.taskId = node.id;
+
+  // Same 40px `.task-checkbox-wrap` the tree rows use, so the tap floor is identical. Checked,
+  // because that is what this row means; unchecking runs the ordinary un-done cascade.
+  const wrap = document.createElement("label");
+  wrap.className = "task-checkbox-wrap";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.className = "task-checkbox";
+  input.checked = true;
+  input.setAttribute("aria-label", `Mark "${node.title}" not done`);
+  input.addEventListener("change", () => toggleDone(node.id, false));
+  wrap.appendChild(input);
+  row.appendChild(wrap);
+
+  const main = document.createElement("div");
+  main.className = "completed-main";
+
+  const title = document.createElement("span");
+  title.className = "completed-title";
+  title.textContent = node.title;
+  main.appendChild(title);
+
+  const meta = document.createElement("span");
+  meta.className = "completed-when";
+  const at = completedAtOf(tasks, node);
+  const parts = [];
+  // Local calendar date — toLocaleDateString('en-CA'), never toISOString (UTC shifts the date
+  // near midnight).
+  if (at !== null) parts.push(`completed ${new Date(at).toLocaleDateString("en-CA")}`);
+  const kids = countDescendants(node.id);
+  if (kids > 0) parts.push(`${kids} subtask${kids === 1 ? "" : "s"}`);
+  meta.textContent = parts.join(" · ");
+  main.appendChild(meta);
+
+  row.appendChild(main);
+  return row;
 }
 
 // ---- Modal host (2.U4): one dialog at a time, appended to <body>. Read-only detail
 // popup and the add/edit form both live here. Escape / overlay-click / Close dismiss;
 // focus moves into the dialog on open and is restored to the opener on close. ----
+// `openModal`/`closeModal`/`metaRow`/`appendField`/`labelledInput` are exported (5.G3) so
+// Calendar's Slot create/edit/detail popups can reuse the exact same scaffold — "one dialog at
+// a time" holds across modules since both target the same `#modal-host` id — rather than
+// duplicating this ~60-line overlay/dialog/escape/focus-trap implementation. Behaviour unchanged.
 
 let _openerEl = null;
 
-function closeModal() {
+export function closeModal() {
   const existing = document.getElementById("modal-host");
   if (existing) existing.remove();
   if (_openerEl && typeof _openerEl.focus === "function") _openerEl.focus();
@@ -368,7 +616,7 @@ function closeModal() {
 // Builds the overlay + dialog scaffold and returns the inner .modal-card to fill. `title`
 // labels the dialog for assistive tech. Opening records the currently-focused element so
 // closing can restore focus.
-function openModal(titleText, fillCard) {
+export function openModal(titleText, fillCard) {
   closeModal();
   _openerEl = typeof document !== "undefined" ? document.activeElement : null;
 
@@ -410,7 +658,7 @@ function openModal(titleText, fillCard) {
   return dialog;
 }
 
-function metaRow(label, value) {
+export function metaRow(label, value) {
   const row = document.createElement("div");
   row.className = "detail-meta-row";
   const k = document.createElement("span");
@@ -715,7 +963,11 @@ function openOccurrenceForm(node, dateISO) {
 // progress), and description (the existing `notes` field — no schema change). Edit / Add
 // subtask / Delete are secondary actions from here. 3.U2: a routine node swaps Deadline for
 // Cadence + a "<done>/<total> (<pct>%)" Progress line and gains the occurrence list.
-function openDetail(node) {
+// Exported (5.G2) so Calendar's Day/Week grid can open this exact same popup for a routine
+// occurrence or event block it renders — the popup itself is unchanged, this just adds a
+// second call site. Relies on this module's own `_state`/`_onChange` already being set by an
+// earlier `mountTasksView` call (true from boot: `js/app.js` always mounts Tasks first).
+export function openDetail(node) {
   openModal(node.title, (dialog) => {
     const meta = document.createElement("div");
     meta.className = "detail-meta";
@@ -1164,7 +1416,7 @@ function openForm({ mode, node = null, parentId = null }) {
   });
 }
 
-function appendField(form, labelText, control) {
+export function appendField(form, labelText, control) {
   const wrap = document.createElement("label");
   wrap.className = "form-field";
   const span = document.createElement("span");
@@ -1176,7 +1428,7 @@ function appendField(form, labelText, control) {
   return control;
 }
 
-function labelledInput(form, labelText, type, value) {
+export function labelledInput(form, labelText, type, value) {
   const input = document.createElement("input");
   input.className = "form-control";
   input.type = type;
@@ -1251,6 +1503,10 @@ function applyDelete(node) {
 // ---- Mount / render ----
 
 function rerender() {
+  // One `today` for the whole render, so the prune and the tree can never disagree about
+  // whether an event is still pending (D47 amendment).
+  const today = todayISO();
+  pruneLingering(today);   // 7.U4: the one place that keeps pending hides honest across re-renders
   _pane.textContent = "";
   const inner = document.createElement("div");
   inner.className = "pane-inner";
@@ -1260,7 +1516,7 @@ function rerender() {
     p.textContent = "No tasks yet. Tap + to add your first one.";
     inner.appendChild(p);
   } else {
-    inner.appendChild(renderTasks(_state));
+    inner.appendChild(renderTasks(_state, today));
   }
   _pane.appendChild(inner);
 }
@@ -1268,10 +1524,19 @@ function rerender() {
 // Mounts the Tasks view into `pane` for `state`. `opts.onChange(state)` is the persistence
 // seam (2.INT wires it to saveState; a no-op leaves mutations in memory). Returns a handle
 // so the shell's global add (+) control can open the add form (05 §2.U1 routed it here).
+// `opts.hideDelayMs` / `opts.hideDelayContainerMs` override the 7.U4 grace delays; app.js passes
+// neither, so the app always runs on logic.js's HIDE_DELAY_MS / HIDE_DELAY_CONTAINER_MS. Pending
+// hides deliberately SURVIVE a re-mount: switching to Calendar and back mid-window must not
+// silently drop a grace window the user can still act on.
 export function mountTasksView(pane, state, opts = {}) {
   _pane = pane;
   _state = state;
   _onChange = typeof opts.onChange === "function" ? opts.onChange : () => {};
+  _delays = {
+    leaf: typeof opts.hideDelayMs === "number" ? opts.hideDelayMs : HIDE_DELAY_MS,
+    container:
+      typeof opts.hideDelayContainerMs === "number" ? opts.hideDelayContainerMs : HIDE_DELAY_CONTAINER_MS,
+  };
   rerender();
   return {
     openAdd: () => openForm({ mode: "add", parentId: null }),
