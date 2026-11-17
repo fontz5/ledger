@@ -1,1 +1,15 @@
 .DS_Store
+
+# 7.A2: local-only files that must never be committed.
+# Per-machine Claude Code settings (permission allowlists, local paths).
+.claude/settings.local.json
+# 7.A4: the local preview-server config (no secret, but a dev-machine tool, not part of the app).
+.claude/launch.json
+# clasp (Apps Script CLI): .clasprc.json holds OAuth credentials, .clasp.json names the script project.
+.clasp.json
+.clasprc.json
+# Environment / key material, in case a build step is ever added.
+.env
+.env.*
+*.pem
+*.key
