@@ -10,7 +10,7 @@ plus optional token-gated Google Sheets sync. Read the repo-root `README.md` for
 deploy/sync instructions.
 
 **The spec, task breakdown, and process for building this app live in a separate sibling repo:
-`../ledger-project`** (its `docs/` and `skills/`). This repo does not contain
+`../ledger-project`** (its `docs/` and `skills/`; the repo this file sits in is `ledger`). This repo does not contain
 the design docs — do not invent field names, formulas, colors, or paths here; they come from
 `ledger-project/docs/03_DOMAIN_CONSTANTS.md`.
 
@@ -42,38 +42,40 @@ one-task-per-session pipeline (`start task X` / `review task X` / etc., defined 
   tool (syntax check + `test.mjs`); the shipped app is plain ES2019+ JS running directly in the
   browser via native `<script type="module">`.
 
-## Current state of the code (Step 1 — data & storage foundation, in progress)
+## Current state of the code
 
-Only the data layer exists so far; there is no UI wiring yet (`js/app.js` and `js/views/*` are not
-built). What's here:
+The app is feature-complete through Step 6 and is in Step 7 (polish + acceptance pass). **For exactly
+which tasks are done, read `ledger-project/docs/04_PROGRESS.md` — this file does not track status.**
+The app is branded **PIN** (D44), but the repo, its storage keys (`ledger.*`) and the docs keep the
+name Ledger; the keys are frozen permanently, so never rename them.
 
 - `js/state.js` — `TASK_TYPES`, `PRIORITIES`, `TASK_COLOR_NAMES`, `DEFAULT_COLOR`, `uid()`,
-  `makeAppState()`, `makeTask({...})`, `makeSlot({...})`. Pure factories; no imports.
-- `js/logic.js` — pure functions only, **no imports/DOM/storage**: `childrenOf`, `expandOccurrences`,
-  `occurrenceStatus`, `progressOf`, `breakdownOf`, `effectiveDone`, `completionState`,
-  `setDoneCascade`. All take a `tasks` array as a parameter rather than reading global state, which is
-  what makes them unit-testable in isolation. Recursive ones (`progressOf`, `effectiveDone`,
-  `setDoneCascade`) carry a `seen` cycle guard — never remove it.
-- `js/storage.js` — the **only** module allowed to touch `localStorage` or `fetch()`. Exports
-  `STORAGE_KEY` (`"ledger.state"`), `CORRUPT_SUFFIX`, `StorageCorruptError`, `Store` (get/set with an
-  in-memory `_mem` fallback that wins on read, so a half-broken localStorage — quota exceeded, Safari
-  private mode — doesn't silently lose data), `StorageProvider` (base class:
-  `authenticate`/`load`/`save`, all throw `"not implemented"`), `LocalStorageProvider` (the working
-  default), and `SheetsProvider` (a stub — every method throws `"deferred to Step 6"`; do not
-  implement real network I/O against it yet).
-- `test.mjs` (repo root) — imports directly from `js/*.js` and asserts against the canonical worked
-  examples (e.g. `progressOf` → 67 / 25 / 50, `expandOccurrences` → 16 Mondays, `progressOf(event)` →
-  `null`). Extend it in place when a task adds new assertions; don't create a second test file.
-- `index.html`, `apps-script/Code.gs` — **pre-existing v1 draft**, predates the locked v2 model.
-  `index.html` is single-file HTML/CSS/JS with a different (v1) data shape; keep it only as a
-  reference until Step 2 re-skins the UI on the new model. **`apps-script/Code.gs` is a known-insecure
-  placeholder** — it has no token check and is deployed as a public "Anyone" endpoint; it is rewritten
-  in Step 6 against `03_DOMAIN_CONSTANTS.md` Part C's contract. Do not treat either file as a spec for
-  new work; the docs repo is the spec.
-
-Not yet built: `css/styles.css`, `js/views/{tasks,calendar,planner}.js`, `js/app.js` (boot/migration
-wiring), `js/sample-data.js`. See `ledger-project/docs/02_TECH_STACK.md` for the full locked folder
-layout these will land in.
+  `makeAppState()`, `makeTask({...})`, `makeSlot({...})`, `migrate()`, `parseImportedState()`.
+  Pure; no imports. `AppState` carries `tasks`, `slots`, `prefs` (D45, display preferences) and
+  `settings` (the Sheets exec URL + token — browser-only, never synced or exported).
+- `js/logic.js` — pure functions only, **no imports/DOM/storage**: the progress/recurrence/overdue
+  logic, the time-grid and calendar helpers, `exportState`, `normalizeExecUrl`, and the D47
+  completed-task helpers. All take a `tasks` array as a parameter rather than reading global state.
+  Recursive ones (`progressOf`, `effectiveDone`, `setDoneCascade`) carry a `seen` cycle guard — never
+  remove it.
+- `js/storage.js` — the **only** module allowed to touch `localStorage` or `fetch()`. `Store` (with an
+  in-memory fallback that wins on read, so a half-broken localStorage does not silently lose data),
+  `LocalStorageProvider` (the default; boot always uses it), and `SheetsProvider` (real: token-gated
+  `load`/`save`, used only through the Settings tab's explicit Connect / Push / Pull — D43).
+  `StorageCorruptError` must never be swallowed; boot surfaces it with an explicit discard recovery.
+- `js/app.js` — boot, migration, the shell/nav, and `persistChange` (the one seam views use to save).
+  `js/sample-data.js` is a **dev-only** seed, loaded by dynamic import only for `?seed`.
+- `js/views/{tasks,deadlines,calendar,settings}.js` — the four tabs. Build DOM with `textContent` /
+  `createElement`; the codebase has no `innerHTML` and should keep it that way.
+- `css/styles.css`, `index.html`, `manifest.json`, `icons/` — the shell and the Add-to-Home-Screen
+  assets. Design tokens come from `03_DOMAIN_CONSTANTS.md` Part B; never invent a hex.
+- `apps-script/Code.gs` — the **token-gated** Sheets backend. It reads `TOKEN` from Script Properties
+  at request time (never in source), answers `GET` with `{ok:true}` only, rejects an unauthorised or
+  malformed request with no data touched, and refuses a save whose `tasks`/`slots` are not arrays.
+  The contract is 03 Part C (D26). Changing it means the user must redeploy it in Apps Script.
+- `test.mjs` (repo root) — the single suite. Extend it in place when a task adds assertions; don't
+  create a second test file. A few checks read the sibling `../ledger-project/docs/` (override with
+  `LEDGER_DOCS_03`); on a clone without it they print a `SKIP:` line instead of failing.
 
 ## Non-obvious rules that apply to any change here
 
