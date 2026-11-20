@@ -180,6 +180,9 @@ body {
   line-height: 1;
   box-shadow: var(--shadow);
   cursor: pointer;
+  /* 7.U6: must stay above the time-grid layers (.timegrid-block 1, .timegrid-nowline 2) and below
+     #modal-host (10), or a block scrolled under the button paints over it and takes the tap. */
+  z-index: 5;
 }
 /* 7.P2: from 720px the nav is at the top, so the button answers to the home indicator directly
    (a tablet in landscape still has one). Fallback 0px = the pre-7.P2 18px on desktop. */

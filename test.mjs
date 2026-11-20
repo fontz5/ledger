@@ -6155,5 +6155,59 @@ const CORRUPT_BYTES = '{"version":1,"tasks":[{"id":"t1","titl'; // truncated mid
   );
 }
 
+// --- 7.U6 The add button stays on top of the Day/Week time-grid ---
+// Same approach as 7.U1: read the SHIPPED css/styles.css and resolve the stacking order from it,
+// never from a restated copy. `.timegrid-block` (z 1) and `.timegrid-nowline` (z 2) used to
+// out-rank `.add-btn` (z auto), so a block scrolled under the button painted over it and took the
+// tap. The button must sit strictly above every time-grid layer and strictly below #modal-host,
+// which has to keep covering it while a sheet is open. Real-browser stacking (elementFromPoint)
+// is recorded in the 7.U6 handoff; the phone feel rides 7.INT.
+{
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync("./css/styles.css", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+
+  // Every innermost `selector { body }` pair. An at-rule wrapper (`@media … {`) never matches,
+  // because its body contains braces, so the rules nested inside it are matched on their own.
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+    selectors: m[1].split(",").map((s) => s.trim()),
+    body: m[2],
+  }));
+  const zOf = (body) => {
+    const m = body.match(/(?:^|;)\s*z-index\s*:\s*([^;]+)/);
+    return m ? m[1].trim() : null;
+  };
+  const zRules = (pred) =>
+    rules.filter((r) => r.selectors.some(pred) && zOf(r.body) !== null).map((r) => ({ sel: r.selectors.join(", "), z: zOf(r.body) }));
+
+  const grid = zRules((s) => /\.timegrid-/.test(s));
+  const modal = zRules((s) => s === "#modal-host");
+  const add = zRules((s) => s === ".add-btn");
+
+  assert(
+    grid.some((r) => /(^|[\s,])\.timegrid-block(?![\w-])/.test(r.sel)) && grid.some((r) => /\.timegrid-nowline(?![\w-])/.test(r.sel)),
+    `7.U6 control: both time-grid layers were found with a z-index (${grid.map((r) => `${r.sel}=${r.z}`).join("; ")})`
+  );
+  assert(modal.length === 1, `7.U6 control: exactly one #modal-host rule sets a z-index (found ${modal.length})`);
+  assert(
+    [...grid, ...modal].every((r) => /^-?\d+$/.test(r.z)),
+    "7.U6 control: every time-grid and #modal-host z-index is a plain integer, so the comparison below is numeric"
+  );
+  assert(
+    add.length === 1 && /^-?\d+$/.test(add[0].z),
+    `7.U6: exactly one .add-btn rule sets an integer z-index (found ${add.map((r) => r.z).join(", ") || "none"})`
+  );
+  assert(
+    rules.some((r) => r.selectors.includes(".add-btn") && /(?:^|;)\s*position\s*:\s*(absolute|fixed)\b/.test(r.body)),
+    "7.U6: .add-btn is still positioned, so its z-index actually applies"
+  );
+  if (add.length === 1 && grid.length > 0 && modal.length === 1) {
+    const addZ = Number(add[0].z);
+    const gridMax = Math.max(...grid.map((r) => Number(r.z)));
+    const modalZ = Number(modal[0].z);
+    assert(addZ > gridMax, `7.U6: .add-btn (z ${addZ}) sits above every time-grid layer (max z ${gridMax})`);
+    assert(addZ < modalZ, `7.U6: .add-btn (z ${addZ}) sits below #modal-host (z ${modalZ}), so an open sheet still covers it`);
+  }
+}
+
 console.log(failed === 0 ? "\nALL PASS" : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);
