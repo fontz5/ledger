@@ -5321,10 +5321,17 @@ const CORRUPT_BYTES = '{"version":1,"tasks":[{"id":"t1","titl'; // truncated mid
           replaceWith(o) { const p = this._parent; if (p) p.children = p.children.map((x) => (x === this ? adopt(p, o) : x)); },
           addEventListener(t, fn) { (this._ev[t] = this._ev[t] || []).push(fn); },
           focus() {},
-          getBoundingClientRect() { return { top: 0, left: 0, width: 300, height: 600 }; },
+          getBoundingClientRect() { return this._rect || { top: 0, left: 0, width: 300, height: 600 }; },
           dispatch(t) { for (const fn of this._ev[t] || []) fn({ type: t, preventDefault() {}, stopPropagation() {} }); },
+          // 7.U7: dispatch WITH a payload (pointer events carry pointerId/clientX/clientY), and the
+          // parentNode link `beginDrag` reads to find the column's rows element.
+          fire(t, ev) { for (const fn of this._ev[t] || []) fn({ type: t, preventDefault() {}, stopPropagation() {}, ...ev }); },
+          get parentNode() { return this._parent; },
         };
-        n.classList = { add(...cs) { n.className += " " + cs.join(" "); } };
+        n.classList = {
+          add(...cs) { n.className += " " + cs.join(" "); },
+          remove(...cs) { n.className = n.className.split(/\s+/).filter((c) => c && !cs.includes(c)).join(" "); },
+        };
         return n;
       }
       const body = el("body");
@@ -5646,6 +5653,116 @@ const CORRUPT_BYTES = '{"version":1,"tasks":[{"id":"t1","titl'; // truncated mid
       "7.A5 D34: a slot and a NON-recurring event get move + resize handles");
     assert(plain("Gym") && plain("Standup"),
       "7.A5 D42: a routine occurrence and a RECURRING event's occurrence get no drag affordance");
+
+    // ---- 7.U7: a dragged block follows the finger SIDEWAYS in Week mode ----------------------
+    // `window` is the real drag listener target (pointermove/up/cancel are attached to it), so the
+    // stub records those handlers and lets the test deliver pointer events with coordinates.
+    // A dedicated task + slot (Tue 12:00, 60 min) so the drags below can't be confused with the
+    // slots earlier 7.A5/7.A6 steps created; removed again in `finally`.
+    const dragTask = makeTask({ type: "finite", title: "Dragger", color: "blue" });
+    const dragSlot = makeSlot({ date: D, start: "12:00", durationMin: 60, taskId: dragTask.id });
+    state.tasks.push(dragTask);
+    state.slots.push(dragSlot);
+    mountCalendarView(pane, state, { onChange: (s) => changes.push(s.slots.length) });
+    const prevWindow = globalThis.window;
+    const winH = {};
+    globalThis.window = {
+      addEventListener(t, fn) { (winH[t] = winH[t] || []).push(fn); },
+      removeEventListener(t, fn) { winH[t] = (winH[t] || []).filter((f) => f !== fn); },
+    };
+    const send = (t, ev) => { for (const fn of [...(winH[t] || [])]) fn({ type: t, pointerId: 1, ...ev }); };
+    try {
+      btn(pane, "Week").dispatch("click");
+      cols().forEach((c, i) => { c._rect = { top: 0, left: i * 100, width: 100, height: 600 }; }); // centres 50,150,250...
+      const wk = (i) => cols()[i];
+      const has = (n, c) => hasCls(n, c);
+      const tue = 2, wed = 3, mon = 1;
+      const reportBlock = () => blockTitled(wk(tue), "Dragger");
+      const dropTargets = () => cols().map((c, i) => (has(c, "timegrid-daycol-droptarget") ? i : -1)).filter((i) => i >= 0);
+      const grab = (blk, x = 250, y = 100) => blk.fire("pointerdown", { pointerId: 1, pointerType: "touch", clientX: x, clientY: y });
+      assert(cols().length === 7 && reportBlock() && dragSlot.date === D && dragSlot.start === "12:00",
+        "7.U7 precondition: Week mode, the fixture slot sits in Tuesday's column at 12:00");
+
+      // (a) a sideways + downward move: the block carries BOTH offsets, and the landing column lights up
+      let blk = reportBlock();
+      grab(blk);
+      send("pointermove", { clientX: 350, clientY: 137.5 }); // +100 px sideways (one column), +2 rows down (18.75 px each)
+      assert(blk.style.transform === "translateX(100px)",
+        `7.U7: a sideways drag in Week mode moves the block with the finger (transform ${JSON.stringify(blk.style.transform)})`);
+      assert(approx(blk.style.top, 43.75), `7.U7: the vertical follow is unchanged by the sideways one (top ${blk.style.top})`);
+      assert(has(blk, "timegrid-block-dragging"), "7.U7: the dragged block rides above its neighbours");
+      assert(dropTargets().join() === String(wed), `7.U7: ONLY the column the drop would land in (Wed) is highlighted (got ${dropTargets()})`);
+
+      // (b) keep moving: the highlight follows the pointer to Monday and leaves Wednesday
+      send("pointermove", { clientX: 150, clientY: 137.5 });
+      assert(blk.style.transform === "translateX(-100px)" && dropTargets().join() === String(mon),
+        `7.U7: dragging back across moves the offset and the highlight (got ${blk.style.transform}, ${dropTargets()})`);
+
+      // (c) drop on Wednesday: commits to Wed's date, decoration is cleared, block is in Wed's column
+      send("pointermove", { clientX: 350, clientY: 137.5 });
+      const changesBefore = changes.length;
+      send("pointerup", { clientX: 350, clientY: 137.5 });
+      assert(dragSlot.date === "2026-09-16" && dragSlot.start === "13:00" && dragSlot.owner === "me" && changes.length === changesBefore + 1,
+        `7.U7: the drop still lands in the column it was over, with the row maths unchanged (got ${dragSlot.date} ${dragSlot.start})`);
+      assert(blk.style.transform === "" && !has(blk, "timegrid-block-dragging") && dropTargets().length === 0,
+        "7.U7: after a drop the offset, the lift and every highlight are gone");
+      assert(!blockTitled(wk(tue), "Dragger") && !!blockTitled(wk(wed), "Dragger"),
+        "7.U7: after the drop the block is drawn in Wednesday's column and not Tuesday's");
+
+      // (d) cancel path: a sideways move then pointercancel leaves the slot untouched and the decoration gone
+      blk = blockTitled(wk(wed), "Dragger");
+      grab(blk, 350, 100);
+      send("pointermove", { clientX: 150, clientY: 100 });
+      assert(blk.style.transform === "translateX(-200px)", "7.U7: the cancel path starts from a live sideways offset");
+      send("pointercancel", {});
+      assert(dragSlot.date === "2026-09-16" && dragSlot.start === "13:00" && blk.style.transform === "" &&
+        !has(blk, "timegrid-block-dragging") && dropTargets().length === 0,
+        "7.U7: pointercancel clears the offset and the highlight and changes nothing");
+
+      // (e) a REJECTED drop (start before 06:00) snaps back clean: nothing committed, nothing left offset
+      blk = blockTitled(wk(wed), "Dragger");
+      grab(blk, 350, 400);
+      send("pointermove", { clientX: 450, clientY: 5 });
+      send("pointerup", { clientX: 450, clientY: 5 }); // -21 rows from 13:00 is far before the grid
+      assert(dragSlot.date === "2026-09-16" && dragSlot.start === "13:00" && blk.style.transform === "" && dropTargets().length === 0,
+        "7.U7: a rejected drop commits nothing and leaves no offset or highlight behind");
+
+      // (f) resize stays vertical-only; a plain tap (no movement) decorates nothing
+      blk = blockTitled(wk(wed), "Dragger");
+      byClass(blk, "timegrid-block-resize-handle")[0].fire("pointerdown", { pointerId: 1, pointerType: "touch", clientX: 350, clientY: 100 });
+      send("pointermove", { clientX: 450, clientY: 140 });
+      assert(!blk.style.transform && !has(blk, "timegrid-block-dragging") && dropTargets().length === 0,
+        "7.U7: a RESIZE drag stays vertical-only (no sideways offset, no highlight)");
+      send("pointercancel", {});
+      blk = blockTitled(wk(wed), "Dragger");
+      grab(blk, 350, 100);
+      send("pointermove", { clientX: 352, clientY: 101 }); // under the 6px threshold
+      send("pointerup", { clientX: 352, clientY: 101 });
+      assert(!blk.style.transform && !has(blk, "timegrid-block-dragging"), "7.U7: a plain tap decorates nothing");
+
+      // (g) D42 unchanged: routine / recurring-event occurrences get no pointerdown handler at all
+      assert(["Gym", "Standup"].every((t) => { const b = blockTitled(wk(tue), t); return !!b && (b._ev.pointerdown || []).length === 0; }),
+        "7.U7 D42: a routine occurrence and a recurring event's occurrence still have no drag handler");
+
+      // (h) Day mode: only one column, so a sideways move means nothing and must not offset the block
+      dragSlot.date = D; dragSlot.start = "09:00";
+      btn(pane, "Day").dispatch("click");
+      btn(pane, "Today").dispatch("click");
+      blk = blockTitled(cols()[0], "Dragger");
+      grab(blk, 100, 100);
+      send("pointermove", { clientX: 200, clientY: 120 });
+      assert(!blk.style.transform && !has(blk, "timegrid-block-dragging") && dropTargets().length === 0,
+        "7.U7: in Day mode a sideways move offsets nothing (the one column is the only target)");
+      send("pointercancel", {});
+    } catch (e) {
+      assert(false, `7.U7: the drag walkthrough threw (${e && e.message})`);
+    } finally {
+      globalThis.window = prevWindow;
+      state.slots = state.slots.filter((x) => x.id !== dragSlot.id);
+      state.tasks = state.tasks.filter((x) => x.id !== dragTask.id);
+      mountCalendarView(pane, state, { onChange: () => {} });
+      btn(pane, "Day").dispatch("click");
+    }
 
     // ---- Line 41: colour on time-grid blocks -------------------------------------------------
     const colourOf = (t) => blockTitled(cols()[0], t).style.background;

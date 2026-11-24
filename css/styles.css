@@ -892,6 +892,12 @@ input[type="datetime-local"].form-control {
   transform: translateX(-50%); border-radius: 2px; background: var(--paper); opacity: .6;
 }
 
+/* 7.U7: a block being dragged sideways in Week mode rides above the neighbouring columns' blocks
+   (later siblings with the same z-index would otherwise paint over it) and the now-line (2), but
+   stays below .add-btn (5, 7.U6). The column the drop would land in gets the accent wash. */
+.timegrid-block-dragging { z-index: 3; box-shadow: var(--shadow); }
+.timegrid-daycol-droptarget { background: var(--accent-wash); }
+
 .timegrid-rows { position: relative; display: grid; grid-template-rows: repeat(32, minmax(20px, 1fr)); }
 .timegrid-row { border-top: 1px solid var(--line); }
 .timegrid-row-half { border-top: 1px solid var(--line); opacity: .5; }

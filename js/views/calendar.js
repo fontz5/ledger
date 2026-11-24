@@ -64,11 +64,12 @@
 // tap on a draggable block still opens its detail exactly as before (movement below
 // `DRAG_THRESHOLD_PX` never engages `_drag`, so the ordinary `click` fires); a real drag beyond
 // that threshold sets `_justDragged` for one tick so the same `click` doesn't ALSO reopen detail
-// right after a drop. Live feedback during drag is vertical-only (`el.style.top`/`height`,
-// mirroring the now-line's percentage-of-window convention) — sub-step 2's own wording ("updates
-// its vertical position live") — a Week-mode column change is resolved only at drop, by nearest-
-// centre column under the pointer (`weekModeTargetDate`, using `_gridColumns` captured for the
-// CURRENT render). Every commit re-validates via the exact same functions the explicit forms use
+// right after a drop. Live feedback during drag is `el.style.top`/`height` (mirroring the now-
+// line's percentage-of-window convention) for the vertical axis; 7.U7 adds the sideways axis in
+// Week mode (a `translateX` on the block, plus a highlight on the column the drop would land in),
+// because the original vertical-only wording left the block standing still on a sideways drag. The
+// Week-mode column change is still RESOLVED only at drop, by nearest-centre column under the
+// pointer (`weekModeTargetDate`, using `_gridColumns` captured for the CURRENT render). Every commit re-validates via the exact same functions the explicit forms use
 // (`moveSlot`/`resizeSlot` for a Slot, `validateEventTimes` for an event) and simply calls the
 // existing full `rerender()` on any drop, valid or not: a commit mutates `_state` first so the
 // re-render shows the new position; a rejected commit never touches `_state`, so the same
@@ -202,6 +203,14 @@ function onDragMove(e) {
   const deltaPct = (dyPx / (_drag.rowHeightPx * GRID_ROWS)) * 100;
   if (_drag.kind === "move") {
     _drag.el.style.top = `${_drag.startTopPct + deltaPct}%`;
+    // 7.U7: follow the finger sideways too, but only where a sideways move means something — Week
+    // mode has several columns, Day mode has one (the drop ignores x there). A transform leaves
+    // the percentage layout `top`/`height` and the drop maths read untouched.
+    if (_gridColumns.length > 1) {
+      _drag.el.style.transform = `translateX(${dxPx}px)`;
+      _drag.el.classList.add("timegrid-block-dragging");
+      setDropTarget(_drag, weekModeTargetDate(e.clientX));
+    }
   } else {
     const minHeightPct = (30 / (GRID_END_MIN - GRID_START_MIN)) * 100;
     _drag.el.style.height = `${Math.max(_drag.startHeightPct + deltaPct, minHeightPct)}%`;
@@ -214,12 +223,33 @@ function endDragListeners() {
   window.removeEventListener("pointercancel", onDragCancel);
 }
 
+// 7.U7: highlight the Week column a drop would land in, so the landing is visible before release.
+// The column is the SAME one `weekModeTargetDate` picks at drop (one function, no second rule).
+function setDropTarget(drag, dateISO) {
+  const col = _gridColumns.find((c) => c.dateISO === dateISO);
+  const next = col ? col.el : null;
+  if (drag.dropEl === next) return;
+  if (drag.dropEl) drag.dropEl.classList.remove("timegrid-daycol-droptarget");
+  if (next) next.classList.add("timegrid-daycol-droptarget");
+  drag.dropEl = next;
+}
+
+// Undo the live-drag decoration on EVERY exit path (drop, rejected drop, cancel). The re-render
+// that follows rebuilds the DOM anyway; clearing first keeps that from being the only safeguard.
+function clearDragDecoration(drag) {
+  if (drag.dropEl) drag.dropEl.classList.remove("timegrid-daycol-droptarget");
+  drag.dropEl = null;
+  drag.el.style.transform = "";
+  drag.el.classList.remove("timegrid-block-dragging");
+}
+
 function onDragEnd(e) {
   if (!_drag || e.pointerId !== _drag.pointerId) return;
   endDragListeners();
   const drag = _drag;
   _drag = null;
   if (!drag.moved) return; // a plain tap — the block's own click handler opens detail as usual
+  clearDragDecoration(drag);
 
   // Set for one tick so the click that (on most platforms) follows this pointerup doesn't ALSO
   // reopen detail right after a drop — but some touch browsers suppress that click entirely
@@ -243,6 +273,7 @@ function onDragEnd(e) {
 function onDragCancel(e) {
   if (!_drag || e.pointerId !== _drag.pointerId) return;
   endDragListeners();
+  clearDragDecoration(_drag);
   _drag = null;
   rerender(); // any live (uncommitted) visual move reverts since _state was never touched
 }
